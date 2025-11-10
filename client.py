@@ -1,30 +1,47 @@
 # client.py
-import asyncio
+import time, sys
+import requests
 import cv2
-import websockets
 
-SERVER_WS = "ws://127.0.0.1:8765"  # <-- change this
+SERVER = "http://127.0.0.1:8765/infer"  # 서버 IP로 교체
+INTERVAL_SEC = 0.5
 
-async def send_stream():
-    cap = cv2.VideoCapture(0)  # use correct index/backend for your cam
+def main():
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        raise RuntimeError("Cannot open camera")
+        print("카메라 열기 실패", file=sys.stderr); sys.exit(1)
+    # Pi 3B 권장 저해상도
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  320)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
-    # Optional: reduce resolution for bandwidth/CPU
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    async with websockets.connect(SERVER_WS, max_size=2**23) as ws:
+    session = requests.Session()
+    try:
         while True:
             ok, frame = cap.read()
-            if not ok:
-                break
-            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if not ok:
+            if not ok: 
+                time.sleep(INTERVAL_SEC); 
                 continue
-            await ws.send(buf.tobytes())
 
-    cap.release()
+            # PNG 인코드
+            ok, buf = cv2.imencode(".png", frame)
+            if not ok:
+                time.sleep(INTERVAL_SEC); 
+                continue
+
+            files = {"frame": ("frame.png", buf.tobytes(), "image/png")}
+            try:
+                r = session.post(SERVER, files=files, timeout=5)
+                if r.ok:
+                    result = r.json()
+                    print(result)  # 필요 시 파싱/표시
+                else:
+                    print("HTTP", r.status_code, r.text[:120], file=sys.stderr)
+            except requests.RequestException as e:
+                print("REQ ERR:", e, file=sys.stderr)
+            time.sleep(INTERVAL_SEC)
+    finally:
+        cap.release()
 
 if __name__ == "__main__":
-    asyncio.run(send_stream())
+    main()
+
