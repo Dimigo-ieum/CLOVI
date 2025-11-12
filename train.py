@@ -58,34 +58,35 @@ def build_from_folder(data_dir, img_size, batch_size, val_split):
     return train_ds, val_ds, class_names
 
 def build_from_fashion_mnist(img_size, batch_size, val_split):
-    # 10 classes: T-shirt/top, Trouser, Pullover, Dress, Coat, Sandal, Shirt, Sneaker, Bag, Ankle boot
+    # Load raw uint8 arrays (28x28), small footprint
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
-    x = np.concatenate([x_train, x_test], axis=0)[..., None]  # (N, 28, 28, 1)
-    y = np.concatenate([y_train, y_test], axis=0)
 
-    # upscale to RGB img_size x img_size
-    x = tf.image.resize(x, (img_size, img_size))
-    x = tf.image.grayscale_to_rgb(x)  # (N, H, W, 3)
-    x = tf.cast(x, tf.float32) / 255.0
+    # Build one dataset and split without materializing huge tensors
+    ds_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+    ds_test  = tf.data.Dataset.from_tensor_slices((x_test,  y_test))
+    ds_all = ds_train.concatenate(ds_test).shuffle(70000, seed=42, reshuffle_each_iteration=False)
 
-    N = x.shape[0]
-    idx = np.arange(N)
-    rng = np.random.default_rng(42)
-    rng.shuffle(idx)
-    x, y = tf.gather(x, idx), tf.gather(y, idx)
+    n_total = 70000
+    n_val = int(n_total * val_split)
+    ds_val = ds_all.take(n_val)
+    ds_tr  = ds_all.skip(n_val)
 
-    n_val = int(N * val_split)
-    x_val, y_val = x[:n_val], y[:n_val]
-    x_train, y_train = x[n_val:], y[n_val:]
+    def _prep(x, y):
+        x = tf.expand_dims(x, -1)                        # (28,28,1)
+        x = tf.image.resize(x, (img_size, img_size))     # (H,W,1)
+        x = tf.image.grayscale_to_rgb(x)                 # (H,W,3)
+        x = tf.cast(x, tf.float32) / 255.0
+        return x, y
 
-    train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train)).shuffle(8192).batch(batch_size)
-    val_ds   = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(batch_size)
+    train_ds = ds_tr.map(_prep, num_parallel_calls=tf.data.AUTOTUNE).batch(batch_size)
+    val_ds   = ds_val.map(_prep, num_parallel_calls=tf.data.AUTOTUNE).batch(batch_size)
 
     class_names = [
         "t-shirt_top","trouser","pullover","dress","coat",
         "sandal","shirt","sneaker","bag","ankle_boot"
     ]
     return train_ds, val_ds, class_names
+
 
 def add_perf(ds, training=False):
     # Data augmentation + standardization
