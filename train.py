@@ -97,12 +97,12 @@ def add_perf(ds, training=False):
         tf.keras.layers.RandomContrast(0.1),
     ])
     # Map to [0,1] and augment only on training
-    def _map_train(x, y):
-        x = tf.cast(x, tf.float32)
-        if tf.reduce_max(x) > 1.1:  # if 0..255 -> normalize
-            x = x / 255.0
-        x = aug(x)
-        return x, y
+    def _map_train(data, label):
+        data = tf.cast(data, tf.float32)
+        if tf.reduce_max(data) > 1.1:  # if 0..255 -> normalize
+            data = data / 255.0
+        data = aug(data)
+        return data, label
     def _map_val(x, y):
         x = tf.cast(x, tf.float32)
         if tf.reduce_max(x) > 1.1:
@@ -220,15 +220,16 @@ def main():
 
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=str(out_dir / "ckpt_best.keras"),
+            filepath=str(out_dir / "ckpt_best.tf"),  # <- no .keras
             monitor="val_acc",
             mode="max",
             save_best_only=True,
+            save_format="tf",                        # <- force TF format
             verbose=1,
         ),
         tf.keras.callbacks.EarlyStopping(
             monitor="val_acc", mode="max", patience=5, restore_best_weights=True
-        )
+        ),
     ]
 
     history = model.fit(
@@ -262,6 +263,6 @@ def main():
 
 if __name__ == "__main__":
     # Quiet TF logs a bit
-    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+    # os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
     main()
 
